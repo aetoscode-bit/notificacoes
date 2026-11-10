@@ -57,7 +57,7 @@ function formatHorarioCurto(data, horario) {
 async function notifyUsuario(usuarioId, { title, body, tag, url }) {
   const userSnap = await db.collection("usuarios").doc(usuarioId).get();
   const tokens = userSnap.exists ? userSnap.data().fcmTokens || [] : [];
-  if (!tokens.length) return;
+  if (!tokens.length) { console.log(`Sem aparelho cadastrado para ${usuarioId}: nada enviado.`); return 0; }
 
   const response = await getMessaging().sendEachForMulticast({
     tokens,
@@ -66,8 +66,10 @@ async function notifyUsuario(usuarioId, { title, body, tag, url }) {
     webpush: { fcmOptions: { link: url || "/agenda.html" } },
   });
 
+  console.log(`Envio "${title}": ${response.successCount} ok, ${response.failureCount} falha(s).`);
   const invalidTokens = [];
   response.responses.forEach((r, idx) => {
+    if (!r.success) console.log("  falha FCM:", r.error?.code, r.error?.message);
     if (!r.success && ["messaging/invalid-registration-token", "messaging/registration-token-not-registered"].includes(r.error?.code)) {
       invalidTokens.push(tokens[idx]);
     }
@@ -76,6 +78,12 @@ async function notifyUsuario(usuarioId, { title, body, tag, url }) {
     const remaining = tokens.filter((t) => !invalidTokens.includes(t));
     await db.collection("usuarios").doc(usuarioId).update({ fcmTokens: remaining });
   }
+  return response.successCount;
+}
+
+async function temAparelho(usuarioId) {
+  const u = await db.collection("usuarios").doc(usuarioId).get();
+  return u.exists && (u.data().fcmTokens || []).length > 0;
 }
 
 // =========================================================
@@ -172,7 +180,10 @@ async function checarLembretes() {
     antecedenciaDe: (uid) => prefs[uid].antecedencia,
   });
 
+  console.log(`Lembretes: ${ags.length} agendamento(s) próximos analisados, ${devidos.length} devido(s).`);
   for (const a of devidos) {
+    // Sem aparelho cadastrado: NÃO consome o aviso (ele será enviado quando o celular for ativado).
+    if (!(await temAparelho(a.usuarioId))) { console.log(`Lembrete pendente (sem aparelho cadastrado): ${a.clienteNome} ${a.horario}`); continue; }
     // Marca ANTES de enviar: se o envio falhar, o cron seguinte não repete (evita duplicidade).
     await a.ref.update({ lembreteEnviado: true });
     await notifyUsuario(a.usuarioId, {
