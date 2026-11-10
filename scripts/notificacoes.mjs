@@ -61,9 +61,10 @@ async function notifyUsuario(usuarioId, { title, body, tag, url }) {
 
   const response = await getMessaging().sendEachForMulticast({
     tokens,
-    notification: { title, body },
-    data: { tag: tag || "agendaai", url: url || "/agenda.html" },
-    webpush: { fcmOptions: { link: url || "/agenda.html" } },
+    // "data-only": o firebase-messaging-sw.js monta e exibe a notificação (uma única vez).
+    data: { title: String(title), body: String(body), tag: tag || "agendaai", url: url || "/agenda.html" },
+    webpush: { headers: { Urgency: "high", TTL: "3600" } },
+    android: { priority: "high" },
   });
 
   console.log(`Envio "${title}": ${response.successCount} ok, ${response.failureCount} falha(s).`);
